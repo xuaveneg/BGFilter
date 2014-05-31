@@ -1,9 +1,13 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <thread>
+#include <ctime>
 
 #define GAUSS(kernelCarre, x, y) \
 	(float)((1 / (2 * 3.14159265358979323846 * (kernelCarre))) * exp(-((x) * (x) + (y) * (y)) / (2 * (kernelCarre))))
+
+#define CLOCKS_PER_MSEC (CLOCKS_PER_SEC / 1000)
 
 #define RET_OK				0
 #define RET_KO_INPUTN		001
@@ -106,21 +110,35 @@ public:
 // Class describing Gaussian Blur Filter
 class GBFilter {
 public:
+	GBFilter() : _kernelSize(0), _tileWidth(0), _tileHeight(0) {
+		_convolutionMatrix = new Matrix();
+	}
+	GBFilter(const GBFilter &filter) : _kernelSize(filter._kernelSize), _tileWidth(filter._tileWidth), _tileHeight(filter._tileHeight) {
+		_convolutionMatrix = new Matrix(*filter._convolutionMatrix);
+	}
 	// Construct a Gaussian Blur Filter : needs informations (we don't want to redefine it after initialization)
 	GBFilter(float kernelSize, int tileWidth, int tileHeight) :
 		_kernelSize(kernelSize),
 		_tileWidth(tileWidth),
 		_tileHeight(tileHeight) {
-		std::cout << "Computing Convolution Matrix ... ";
+		std::cout << "Computing Convolution Matrix ... "; clock_t time = clock();
 		// Construct convolution matrix
-		int matrixSize = (int)(6.f * kernelSize);
+		int matrixSize = fmin((int)(6.f * kernelSize ) + 1, 2 * fmax(tileHeight, tileWidth));
 		_convolutionMatrix = new Matrix(matrixSize);
+		float norm = 0, value;
 		for (int j = 0; j < matrixSize; ++j) {
 			for (int i = 0; i < matrixSize; ++i) {
-				(*_convolutionMatrix)(i, j) = GAUSS(kernelSize * kernelSize, i - matrixSize / 2, j - matrixSize / 2);
+				value = GAUSS(kernelSize * kernelSize, i - matrixSize / 2, j - matrixSize / 2);
+				(*_convolutionMatrix)(i, j) = value;
+				norm += value;
 			}
 		}
-		std::cout << "Done." << std::endl;
+		for (int j = 0; j < matrixSize; ++j) {
+			for (int i = 0; i < matrixSize; ++i) {
+				(*_convolutionMatrix)(i, j) /= norm;
+			}
+		}
+		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
 		std::cout << "Convolution Matrix Size: " << matrixSize << std::endl;
 	}
 	// Destruct a Gaussian Blur Filter, ie its Convolution Matrix
@@ -150,8 +168,6 @@ private:
 	//friend class Bitmap;
 // We don't want GBFilter to be initialized from nothing nor copied
 private:
-	GBFilter() : _kernelSize(0), _tileWidth(0), _tileHeight(0){};
-	GBFilter(const GBFilter &filter) : _kernelSize(filter._kernelSize), _tileWidth(filter._tileWidth), _tileHeight(filter._tileHeight) {};
 	const GBFilter &operator=(const GBFilter &filter) {}
 };
 
@@ -210,9 +226,13 @@ private:
 
 	// Reads a pixel data
 	void fileReadPixel(float &red, float &green, float &blue, FILE *f) {
-		if (1 != fread(&blue, 1, 1, f)) throw RET_KO_FILEREAD;
-		if (1 != fread(&green, 1, 1, f)) throw RET_KO_FILEREAD;
-		if (1 != fread(&red, 1, 1, f)) throw RET_KO_FILEREAD;
+		char c;
+		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
+		blue = (int)c / 255.f;
+		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
+		green = (int)c / 255.f;
+		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
+		red = (int)c / 255.f;
 	}
 	// File writing utils
 	// Writes an unsigned 32 bit value
@@ -255,9 +275,13 @@ private:
 	}
 	// Writes a pixel data
 	void fileWritePixel(float red, float green, float blue, FILE *f) const {
-		if (1 != fwrite(&blue, 1, 1, f)) throw RET_KO_FILEWRITE;
-		if (1 != fwrite(&green, 1, 1, f)) throw RET_KO_FILEWRITE;
-		if (1 != fwrite(&red, 1, 1, f)) throw RET_KO_FILEWRITE;
+		char c;
+		c = (char)((int)(blue * 255));
+		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
+		c = (char)((int)(green * 255));
+		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
+		c = (char)((int)(red * 255));
+		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
 	}
 	// Bitmap File structs
 	struct {
@@ -284,8 +308,9 @@ private:
 	uint32_t _w;
 	uint32_t _h;
 public:
+	// Construct a Bitmap from a bmp file
 	Bitmap(const char *inputFile) {
-		std::cout << "Reading File ... ";
+		std::cout << "Reading File ... "; clock_t time = clock();
 		// Read 24-bit Bitmap File
 		FILE *f = fopen(inputFile, "rb");
 		// Thanks, Wikipedia !
@@ -334,43 +359,12 @@ public:
 			fseek(f, (4 - ((tell - fileHeader.dataOffset) % 4)) % 4, SEEK_CUR);
 		}
 		fclose(f);
-		std::cout << "Done." << std::endl;
+		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
 		std::cout << "Size: " << _w << 'x' << _h << std::endl;
 	}
-	void apply(const GBFilter &filter) {
-		std::cout << "Applying Filter ... " << std::endl;
-		unsigned int convSize = filter.convSize();
-		unsigned int iOut, jOut;
-		unsigned int tileWidth = filter.tileWidth(), tileHeight = filter.tileHeight();
-		for (unsigned int color = 0; color < 3; ++color) {
-			std::cout << "Color " << color << " ... ";
-			Matrix *outMatrix = new Matrix(_w, _h);
-			Matrix *inMatrix = data[color];
-			for (unsigned int jIn = 0; jIn < _h; ++jIn) {
-				for (unsigned int iIn = 0; iIn < _w; ++iIn) {
-					for (unsigned int jConv = 0; jConv < convSize; ++jConv) {
-						jOut = jIn - (jConv - convSize / 2);
-						if (jOut / tileHeight != jIn / tileHeight)
-							// The column is out of computing bound for this tile (note : works also for < 0 with overflow)
-							continue;
-						for (unsigned int iConv = 0; iConv < convSize; ++iConv) {
-							iOut = iIn - (iConv - convSize / 2);
-							if (iOut / tileWidth != iIn / tileWidth)
-								// The row is out of computing bound for this tile (note : works also for < 0 with overflow)
-								continue;
-							(*outMatrix)(0, 0) += (*inMatrix)(iIn, jIn) * filter(iConv, jConv);
-						}
-					}
-				}
-			}
-			data[color] = outMatrix;
-			delete inMatrix;
-			std::cout << "Done." << std::endl;
-		}
-		std::cout << "Filter Applied." << std::endl;
-	}
+	// Write the bitmap to a bmp file
 	void write(const char* outputFile) const {
-		std::cout << "Writing Output File ... ";
+		std::cout << "Writing Output File ... "; clock_t time = clock();
 		FILE *f = fopen(outputFile, "wb");
 		// Bitmap File Header
 		fileWrite16b(fileHeader.magicNumber, f);// Identify BMP file	(offset 0)	(size 2)
@@ -403,7 +397,63 @@ public:
 		}
 		if (fileHeader.fileSize != ftell(f)) throw RET_KO_FILEWRITE;
 		fclose(f);
-		std::cout << "Done." << std::endl;
+		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+	}
+// Private threaded computation functions
+private:
+	// Compute a matrix element
+	void computeElement(unsigned int i, unsigned int j, float *element, const Matrix &inMatrix, const GBFilter &filter) {
+		(*element) = 0;
+		unsigned int convSize = filter.convSize();
+		unsigned int tileWidth = filter.tileWidth(), tileHeight = filter.tileHeight();
+		unsigned int iTile = i % tileWidth, jTile = j % tileHeight;
+		for (unsigned int jConv = 0; jConv < convSize; ++jConv) {
+			if ((jTile + jConv < convSize / 2) || // j too low for the current tile
+				(jTile + jConv >= tileHeight + convSize / 2) || // j too high for the current tile
+				(j + jConv >= _h + convSize / 2)) // j too high for the image
+				continue;
+			for (unsigned int iConv = 0; iConv < convSize; ++iConv) {
+				if ((iTile + iConv < convSize / 2) || // i too low for the current tile
+					(iTile + iConv >= tileWidth + convSize / 2) || // i too high for the current tile
+					(i + iConv >= _w + convSize / 2)) // i too high for the image
+					continue;
+				(*element) += inMatrix(i + iConv - convSize / 2, j + jConv - convSize / 2) * filter(iConv, jConv);
+			}
+		}
+	}
+	// Compute a color matrix
+	void computeMatrix(Matrix **inMatrix, const GBFilter &filter) {
+		Matrix *outMatrix = new Matrix(_w, _h);
+		std::thread *elementThread = new std::thread[_h*_w];
+		// Create threads (one for each element)
+		for (unsigned int jOut = 0; jOut < _h; ++jOut) {
+			for (unsigned int iOut = 0; iOut < _w; ++iOut) {
+				elementThread[iOut + _w*jOut] = std::thread(&Bitmap::computeElement, this, iOut, jOut, &((*outMatrix)(iOut, jOut)), **inMatrix, filter);
+			}
+		}
+		// Retrieve threads
+		for (unsigned int jOut = 0; jOut < _h; ++jOut) {
+			for (unsigned int iOut = 0; iOut < _w; ++iOut) {
+				elementThread[iOut + _w*jOut].join();
+			}
+		}
+		delete *inMatrix;
+		*inMatrix = outMatrix;
+	}
+public:
+	// apply the filter
+	void apply(const GBFilter &filter) {
+		std::cout << "Applying Filter ... "; clock_t time = clock();
+		std::thread colorThread[3];
+		// Create threads (one for each color matrix)
+		for (unsigned int color = 0; color < 3; ++color) {
+			colorThread[color] = std::thread(&Bitmap::computeMatrix, this, &(data[color]), filter);
+		}
+		// Retrieve threads
+		for (unsigned int color = 0; color < 3; ++color) {
+			colorThread[color].join();
+		}
+		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
 	}
 private:
 	Matrix *data[3];
