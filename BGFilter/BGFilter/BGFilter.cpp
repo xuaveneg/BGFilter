@@ -123,7 +123,7 @@ public:
 		_tileHeight(tileHeight) {
 		std::cout << "Computing Convolution Matrix ... "; clock_t time = clock();
 		// Construct convolution matrix
-		int matrixSize = fmin((int)(6.f * kernelSize ) + 1, 2 * fmax(tileHeight, tileWidth));
+		int matrixSize = (int)fmin((int)(6.f * kernelSize ) + 1, 2 * fmax(tileHeight, tileWidth));
 		_convolutionMatrix = new Matrix(matrixSize);
 		float norm = 0, value;
 		for (int j = 0; j < matrixSize; ++j) {
@@ -276,11 +276,14 @@ private:
 	// Writes a pixel data
 	void fileWritePixel(float red, float green, float blue, FILE *f) const {
 		char c;
-		c = (char)((int)(blue * 255));
+		int trueRed = (int)(red > 1.f ? 255.f : red < 0.f ? 0.f : 255.f * red);//(255.f * red);
+		int trueGreen = (int)(green > 1.f ? 255.f : green < 0.f ? 0.f : 255.f * green);//(255.f * green);
+		int trueBlue = (int)(blue > 1.f ? 255.f : blue < 0.f ? 0.f : 255.f * blue);//(255.f * blue);
+		c = (char)trueBlue;
 		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
-		c = (char)((int)(green * 255));
+		c = (char)trueGreen;
 		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
-		c = (char)((int)(red * 255));
+		c = (char)trueRed;
 		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
 	}
 	// Bitmap File structs
@@ -313,6 +316,7 @@ public:
 		std::cout << "Reading File ... "; clock_t time = clock();
 		// Read 24-bit Bitmap File
 		FILE *f = fopen(inputFile, "rb");
+		if (f == NULL) throw RET_KO_FILEREAD;
 		// Thanks, Wikipedia !
 		// Bitmap File Header
 		//fileReadHeadPattern("BM", 2, f);
@@ -345,17 +349,13 @@ public:
 		_w = abs(informationHeader.width);
 		_h = abs(informationHeader.height);
 		long int tell;
-		long int val = fileHeader.dataOffset;
 		for (unsigned int i = 0; i < 3; ++i)
 			data[i] = new Matrix(_w, _h);
 		for (unsigned int j = 0; j < _h; ++j) {
 			for (unsigned int i = 0; i < _w; ++i) {
 				fileReadPixel((*data[0])(i, j), (*data[1])(i, j), (*data[2])(i, j), f);
-				tell = ftell(f);
-				val += 3;
 			}
 			tell = ftell(f);
-			val += (4 - ((val - fileHeader.dataOffset) % 4)) % 4;
 			fseek(f, (4 - ((tell - fileHeader.dataOffset) % 4)) % 4, SEEK_CUR);
 		}
 		fclose(f);
@@ -366,6 +366,7 @@ public:
 	void write(const char* outputFile) const {
 		std::cout << "Writing Output File ... "; clock_t time = clock();
 		FILE *f = fopen(outputFile, "wb");
+		if (f == NULL) throw RET_KO_FILEWRITE;
 		// Bitmap File Header
 		fileWrite16b(fileHeader.magicNumber, f);// Identify BMP file	(offset 0)	(size 2)
 		fileWrite32b(fileHeader.fileSize, f);	// BMP size				(offset 2)	(size 4)
@@ -395,17 +396,16 @@ public:
 			tell = ftell(f);
 			fwrite(padding, 1, (4 - ((tell - fileHeader.dataOffset) % 4)) % 4, f);
 		}
-		if (fileHeader.fileSize != ftell(f)) throw RET_KO_FILEWRITE;
 		fclose(f);
 		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
 	}
 // Private threaded computation functions
 private:
 	// Compute a matrix element
-	void computeElement(unsigned int i, unsigned int j, float *element, const Matrix &inMatrix, const GBFilter &filter) {
+	void computeElement(unsigned int i, unsigned int j, float *element, const Matrix *inMatrix, const GBFilter *filter) {
 		(*element) = 0;
-		unsigned int convSize = filter.convSize();
-		unsigned int tileWidth = filter.tileWidth(), tileHeight = filter.tileHeight();
+		unsigned int convSize = filter->convSize();
+		unsigned int tileWidth = filter->tileWidth(), tileHeight = filter->tileHeight();
 		unsigned int iTile = i % tileWidth, jTile = j % tileHeight;
 		for (unsigned int jConv = 0; jConv < convSize; ++jConv) {
 			if ((jTile + jConv < convSize / 2) || // j too low for the current tile
@@ -417,18 +417,18 @@ private:
 					(iTile + iConv >= tileWidth + convSize / 2) || // i too high for the current tile
 					(i + iConv >= _w + convSize / 2)) // i too high for the image
 					continue;
-				(*element) += inMatrix(i + iConv - convSize / 2, j + jConv - convSize / 2) * filter(iConv, jConv);
+				(*element) += (*inMatrix)(i + iConv - convSize / 2, j + jConv - convSize / 2) * (*filter)(iConv, jConv);
 			}
 		}
 	}
 	// Compute a color matrix
-	void computeMatrix(Matrix **inMatrix, const GBFilter &filter) {
+	void computeMatrix(Matrix **inMatrix, const GBFilter *filter) {
 		Matrix *outMatrix = new Matrix(_w, _h);
 		std::thread *elementThread = new std::thread[_h*_w];
 		// Create threads (one for each element)
 		for (unsigned int jOut = 0; jOut < _h; ++jOut) {
 			for (unsigned int iOut = 0; iOut < _w; ++iOut) {
-				elementThread[iOut + _w*jOut] = std::thread(&Bitmap::computeElement, this, iOut, jOut, &((*outMatrix)(iOut, jOut)), **inMatrix, filter);
+				elementThread[iOut + _w*jOut] = std::thread(&Bitmap::computeElement, this, iOut, jOut, &((*outMatrix)(iOut, jOut)), *inMatrix, filter);
 			}
 		}
 		// Retrieve threads
@@ -447,7 +447,7 @@ public:
 		std::thread colorThread[3];
 		// Create threads (one for each color matrix)
 		for (unsigned int color = 0; color < 3; ++color) {
-			colorThread[color] = std::thread(&Bitmap::computeMatrix, this, &(data[color]), filter);
+			colorThread[color] = std::thread(&Bitmap::computeMatrix, this, &(data[color]), &filter);
 		}
 		// Retrieve threads
 		for (unsigned int color = 0; color < 3; ++color) {
