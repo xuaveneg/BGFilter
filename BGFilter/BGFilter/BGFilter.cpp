@@ -1,18 +1,23 @@
+#define SHOWTIME
+
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <thread>
+#ifdef SHOWTIME
 #include <ctime>
+#endif
 
 #define GAUSS(kernelCarre, x, y) \
 	(float)((1 / (2 * 3.14159265358979323846 * (kernelCarre))) * exp(-((x) * (x) + (y) * (y)) / (2 * (kernelCarre))))
 
 #define CLOCKS_PER_MSEC (CLOCKS_PER_SEC / 1000)
 
-#define RET_OK				0
-#define RET_KO_INPUTN		001
-#define RET_KO_INPUTTYPE	002
-#define RET_KO_INPUTFILE	003
+#define RET_OK						0
+#define RET_KO_INPUTN				001
+#define RET_KO_INPUTTYPE			002
+#define RET_KO_INPUTFILE			003
+#define RET_KO_OUTPUTFILE			004
 
 #define RET_KO_MATRIX_OOB			101
 
@@ -110,18 +115,18 @@ public:
 // Class describing Gaussian Blur Filter
 class GBFilter {
 public:
-	GBFilter() : _kernelSize(0), _tileWidth(0), _tileHeight(0) {
-		_convolutionMatrix = new Matrix();
-	}
 	GBFilter(const GBFilter &filter) : _kernelSize(filter._kernelSize), _tileWidth(filter._tileWidth), _tileHeight(filter._tileHeight) {
 		_convolutionMatrix = new Matrix(*filter._convolutionMatrix);
 	}
 	// Construct a Gaussian Blur Filter : needs informations (we don't want to redefine it after initialization)
-	GBFilter(float kernelSize, int tileWidth, int tileHeight) :
+	GBFilter(float kernelSize, unsigned int tileWidth, unsigned int tileHeight) :
 		_kernelSize(kernelSize),
 		_tileWidth(tileWidth),
 		_tileHeight(tileHeight) {
-		std::cout << "Computing Convolution Matrix ... "; clock_t time = clock();
+		std::cout << "Computing Convolution Matrix ... ";
+#ifdef SHOWTIME
+		clock_t time = clock();
+#endif
 		// Construct convolution matrix
 		int matrixSize = (int)fmin((int)(6.f * kernelSize ) + 1, 2 * fmax(tileHeight, tileWidth));
 		_convolutionMatrix = new Matrix(matrixSize);
@@ -138,7 +143,12 @@ public:
 				(*_convolutionMatrix)(i, j) /= norm;
 			}
 		}
-		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+		std::cout << "Done.";
+#ifdef SHOWTIME
+		std::cout << "(" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+#else
+		std::cout << std::endl;
+#endif
 		std::cout << "Convolution Matrix Size: " << matrixSize << std::endl;
 	}
 	// Destruct a Gaussian Blur Filter, ie its Convolution Matrix
@@ -168,6 +178,9 @@ private:
 	//friend class Bitmap;
 // We don't want GBFilter to be initialized from nothing nor copied
 private:
+	GBFilter() : _kernelSize(0), _tileWidth(0), _tileHeight(0) {
+		_convolutionMatrix = new Matrix();
+	}
 	const GBFilter &operator=(const GBFilter &filter) {}
 };
 
@@ -228,11 +241,11 @@ private:
 	void fileReadPixel(float &red, float &green, float &blue, FILE *f) {
 		char c;
 		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
-		blue = (int)c / 255.f;
+		blue = (uint8_t)c / 255.f;
 		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
-		green = (int)c / 255.f;
+		green = (uint8_t)c / 255.f;
 		if (1 != fread(&c, 1, 1, f)) throw RET_KO_FILEREAD;
-		red = (int)c / 255.f;
+		red = (uint8_t)c / 255.f;
 	}
 	// File writing utils
 	// Writes an unsigned 32 bit value
@@ -276,9 +289,9 @@ private:
 	// Writes a pixel data
 	void fileWritePixel(float red, float green, float blue, FILE *f) const {
 		char c;
-		int trueRed = (int)(red > 1.f ? 255.f : red < 0.f ? 0.f : 255.f * red);//(255.f * red);
-		int trueGreen = (int)(green > 1.f ? 255.f : green < 0.f ? 0.f : 255.f * green);//(255.f * green);
-		int trueBlue = (int)(blue > 1.f ? 255.f : blue < 0.f ? 0.f : 255.f * blue);//(255.f * blue);
+		int trueRed = (int)(red > 1.f ? 255.f : red < 0.f ? 0.f : 255.f * red);//(255.f * red); //
+		int trueGreen = (int)(green > 1.f ? 255.f : green < 0.f ? 0.f : 255.f * green);//(255.f * green); //
+		int trueBlue = (int)(blue > 1.f ? 255.f : blue < 0.f ? 0.f : 255.f * blue);//(255.f * blue); //
 		c = (char)trueBlue;
 		if (1 != fwrite(&c, 1, 1, f)) throw RET_KO_FILEWRITE;
 		c = (char)trueGreen;
@@ -313,10 +326,13 @@ private:
 public:
 	// Construct a Bitmap from a bmp file
 	Bitmap(const char *inputFile) {
-		std::cout << "Reading File ... "; clock_t time = clock();
+		std::cout << "Reading File ... ";
+#ifdef SHOWTIME
+		clock_t time = clock();
+#endif
 		// Read 24-bit Bitmap File
 		FILE *f = fopen(inputFile, "rb");
-		if (f == NULL) throw RET_KO_FILEREAD;
+		if (f == NULL) throw RET_KO_INPUTFILE;
 		// Thanks, Wikipedia !
 		// Bitmap File Header
 		//fileReadHeadPattern("BM", 2, f);
@@ -359,14 +375,22 @@ public:
 			fseek(f, (4 - ((tell - fileHeader.dataOffset) % 4)) % 4, SEEK_CUR);
 		}
 		fclose(f);
-		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+		std::cout << "Done.";
+#ifdef SHOWTIME
+		std::cout << "(" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+#else
+		std::cout << std::endl;
+#endif
 		std::cout << "Size: " << _w << 'x' << _h << std::endl;
 	}
 	// Write the bitmap to a bmp file
 	void write(const char* outputFile) const {
-		std::cout << "Writing Output File ... "; clock_t time = clock();
+		std::cout << "Writing Output File ... ";
+#ifdef SHOWTIME
+			clock_t time = clock();
+#endif
 		FILE *f = fopen(outputFile, "wb");
-		if (f == NULL) throw RET_KO_FILEWRITE;
+		if (f == NULL) throw RET_KO_OUTPUTFILE;
 		// Bitmap File Header
 		fileWrite16b(fileHeader.magicNumber, f);// Identify BMP file	(offset 0)	(size 2)
 		fileWrite32b(fileHeader.fileSize, f);	// BMP size				(offset 2)	(size 4)
@@ -397,7 +421,12 @@ public:
 			fwrite(padding, 1, (4 - ((tell - fileHeader.dataOffset) % 4)) % 4, f);
 		}
 		fclose(f);
-		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+		std::cout << "Done.";
+#ifdef SHOWTIME
+		std::cout << "(" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+#else
+		std::cout << std::endl;
+#endif
 	}
 // Private threaded computation functions
 private:
@@ -443,7 +472,10 @@ private:
 public:
 	// apply the filter
 	void apply(const GBFilter &filter) {
-		std::cout << "Applying Filter ... "; clock_t time = clock();
+		std::cout << "Applying Filter ... ";
+#ifdef SHOWTIME
+		clock_t time = clock();
+#endif
 		std::thread colorThread[3];
 		// Create threads (one for each color matrix)
 		for (unsigned int color = 0; color < 3; ++color) {
@@ -453,7 +485,12 @@ public:
 		for (unsigned int color = 0; color < 3; ++color) {
 			colorThread[color].join();
 		}
-		std::cout << "Done. (" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+		std::cout << "Done.";
+#ifdef SHOWTIME
+		std::cout << "(" << (clock() - time) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+#else
+		std::cout << std::endl;
+#endif
 	}
 private:
 	Matrix *data[3];
@@ -467,24 +504,54 @@ private:
 
 int main(int argc, char **argv)
 {
-	char *input_file;
-	char *output_file;
+#ifdef SHOWTIME
+	clock_t beginTime = clock();
+#endif
+	char *input_file = "";
+	char *output_file = "";
 	float kernel_size;
 	int tile_width;
 	int tile_height;
-	if (argc == 6) {
-		input_file = argv[1];
-		output_file = argv[2];
-		kernel_size = (float)atof(argv[3]);
-		tile_width = atoi(argv[4]);
-		tile_height = atoi(argv[5]);
+	int ret = RET_OK;
+	try {
+		if (argc == 6) {
+			input_file = argv[1];
+			output_file = argv[2];
+			kernel_size = abs((float)atof(argv[3]));
+			tile_width =abs(atoi(argv[4]));
+			tile_height = abs(atoi(argv[5]));
+		}
+		else {
+			throw RET_KO_INPUTN;
+		}
+		GBFilter filter(kernel_size, tile_width, tile_height);
+		Bitmap bitmap(input_file);
+		bitmap.apply(filter);
+		bitmap.write(output_file);
 	}
-	else if (argc == 4) {
-		input_file = argv[1];
-		output_file = argv[2];
-		kernel_size = (float)atof(argv[3]);
-	}
-	else {
+	catch (int e) {
+		switch (e) {
+		case RET_KO_FILEBODY:
+			std::cout << "Error : Invalid Input File Body (" << input_file << ')' << std::endl; break;
+		case RET_KO_FILEHEAD:
+			std::cout << "Error : Invalid Input File Head (" << input_file << ')' << std::endl; break;
+		case RET_KO_FILEREAD:
+			std::cout << "Error : Can't read Input File (" << input_file << ')' << std::endl; break;
+		case RET_KO_FILEUNSUPPORTED:
+			std::cout << "Error : Input File Unsupported (" << input_file << ')' << std::endl; break;
+		case RET_KO_FILEWRITE:
+			std::cout << "Error : Can't write Output File (" << output_file << ')' << std::endl; break;
+		case RET_KO_INPUTFILE:
+			std::cout << "Error : Invalid Intput File (" << input_file << ')' << std::endl; break;
+		case RET_KO_OUTPUTFILE:
+			std::cout << "Error : Invalid Output File (" << output_file << ')' << std::endl; break;
+		case RET_KO_INPUTN:
+			std::cout << "Error : Wrong Number of Inputs (" << (argc-1) << ')' << std::endl; break;
+		case RET_KO_INPUTTYPE:
+			std::cout << "Error : Wrong Input Type" << std::endl; break;
+		case RET_KO_MATRIX_OOB:
+			std::cout << "Error : Matrix access Out Of Bond" << std::endl; break;
+		}
 		std::cout << "Usage:" << std::endl;
 		std::cout << "gbfilter input_file output_file kernel_size tile_width tile_height" << std::endl;
 		std::cout << std::endl;
@@ -501,12 +568,11 @@ int main(int argc, char **argv)
 		std::cout << "tile_width" << std::endl;
 		std::cout << "set the width of the tile" << std::endl;
 		std::cout << "tile_height" << std::endl;
-		std::cout << "set the height of the tile" << std::endl;
-		return RET_KO_INPUTN;
+		std::cout << "set the height of the tile" << std::endl;		std::cout << "Done.";
+		ret = e;
 	}
-	GBFilter filter(kernel_size, tile_width, tile_height);
-	Bitmap bitmap(input_file);
-	bitmap.apply(filter);
-	bitmap.write(output_file);
+#ifdef SHOWTIME
+	std::cout << "Total Elapsed Time : (" << (clock() - beginTime) / CLOCKS_PER_MSEC << "ms)" << std::endl;
+#endif
 	return RET_OK;
 }

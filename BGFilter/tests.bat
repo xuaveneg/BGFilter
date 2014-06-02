@@ -23,3 +23,4 @@ for /l %%H in (1, 9, 100) do (
 	)
 )
 echo Test Ending Time  : %TIME%
+pause

@@ -67,9 +67,6 @@
   <ItemGroup>
     <ClCompile Include="BGFilter.cpp" />
   </ItemGroup>
-  <ItemGroup>
-    <Image Include="..\lionhe11.bmp" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
